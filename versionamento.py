@@ -1,105 +1,139 @@
+# -----------------------------
+# Instalar dependências
+# -----------------------------
+!pip install PyGithub pandas openpyxl xlsxwriter streamlit
+
+import zipfile, json, re, io
+import pandas as pd
 import streamlit as st
-from github import Github, GithubException
-import tempfile
-import zipfile
-import difflib
-
-st.title("Versionamento e Envio de PBIT para GitHub")
+from github import Github
 
 # -----------------------------
-# Upload de arquivos PBIT
+# Funções auxiliares
 # -----------------------------
-st.header("Carregar versão atual do PBIT")
-uploaded_file = st.file_uploader("Escolha o arquivo PBIT atual", type="pbit", key="current")
+DAX_REF_PATTERN = re.compile(r"'?([A-Za-z0-9_ ]+)'?\[([A-Za-z0-9_ ]+)\]")
 
-st.header("Carregar versão anterior do PBIT (opcional para comparação)")
-previous_file = st.file_uploader("Escolha a versão anterior do PBIT", type="pbit", key="previous")
+def extract_table_column_refs_from_text(text):
+    used = set()
+    if not text:
+        return used
+    if isinstance(text, list):
+        text = "\n".join(text)
+    if not isinstance(text, str):
+        return used
+    for m in DAX_REF_PATTERN.finditer(text):
+        if m.group(1) and m.group(2):
+            used.add((m.group(1).strip(), m.group(2).strip()))
+    return used
 
-st.header("Configurações do GitHub")
-repo_name = st.text_input("Repositório GitHub (usuario/repositorio)")
-github_token = st.text_input("Token GitHub", type="password")
-github_path = st.text_input("Caminho no repositório (ex: modelos/meu_modelo.pbit)")
+def load_model_json(pbit_file):
+    with zipfile.ZipFile(pbit_file, "r") as z:
+        return json.loads(z.read("DataModelSchema"))
+
+def extract_model_info(model_json):
+    tables = model_json.get("model", {}).get("tables", [])
+    relationships = model_json.get("model", {}).get("relationships", [])
+    measure_list = []
+    for t in tables:
+        tname = t["name"]
+        for m in t.get("measures", []):
+            expr = m.get("expression", "")
+            if isinstance(expr, list):
+                expr = "\n".join(expr)
+            measure_list.append({"table": tname, "measure": m["name"], "expression": expr})
+    return tables, relationships, measure_list
 
 # -----------------------------
 # Função de comparação
 # -----------------------------
-def comparar_pbits(file_current, file_previous):
-    """
-    Compara dois arquivos PBIT linha a linha (como texto JSON dentro do DataModelSchema)
-    Retorna uma lista de diferenças
-    """
-    def extrair_schema(pbit_bytes):
-        """Extrai DataModelSchema do PBIT como lista de linhas, ignorando erros de encoding."""
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(pbit_bytes)
-            tmp_path = tmp.name
-        with zipfile.ZipFile(tmp_path, "r") as z:
-            data = z.read("DataModelSchema").decode("utf-8", errors="ignore")
-        return data.splitlines()
-
-    current_lines = extrair_schema(file_current.getvalue())
-    previous_lines = extrair_schema(file_previous.getvalue())
-
-    diff = list(difflib.unified_diff(previous_lines, current_lines, lineterm=''))
-    return diff
+def compare_models(pbit1, pbit2):
+    model1 = load_model_json(pbit1)
+    model2 = load_model_json(pbit2)
+    
+    tables1, rels1, measures1 = extract_model_info(model1)
+    tables2, rels2, measures2 = extract_model_info(model2)
+    
+    # Tabelas adicionadas ou removidas
+    t1 = set([t["name"] for t in tables1])
+    t2 = set([t["name"] for t in tables2])
+    added_tables = t2 - t1
+    removed_tables = t1 - t2
+    
+    # Medidas adicionadas ou removidas
+    m1 = set([(m["table"], m["measure"]) for m in measures1])
+    m2 = set([(m["table"], m["measure"]) for m in measures2])
+    added_measures = m2 - m1
+    removed_measures = m1 - m2
+    
+    # Relacionamentos
+    r1 = set([(r["fromTable"], r["fromColumn"], r["toTable"], r["toColumn"]) for r in rels1])
+    r2 = set([(r["fromTable"], r["fromColumn"], r["toTable"], r["toColumn"]) for r in rels2])
+    added_rels = r2 - r1
+    removed_rels = r1 - r2
+    
+    results = {
+        "added_tables": pd.DataFrame(list(added_tables), columns=["table"]),
+        "removed_tables": pd.DataFrame(list(removed_tables), columns=["table"]),
+        "added_measures": pd.DataFrame(list(added_measures), columns=["table","measure"]),
+        "removed_measures": pd.DataFrame(list(removed_measures), columns=["table","measure"]),
+        "added_relationships": pd.DataFrame(list(added_rels), columns=["fromTable","fromColumn","toTable","toColumn"]),
+        "removed_relationships": pd.DataFrame(list(removed_rels), columns=["fromTable","fromColumn","toTable","toColumn"])
+    }
+    
+    return results
 
 # -----------------------------
 # Função de envio para GitHub
 # -----------------------------
-def enviar_para_github(uploaded_file, repo_name, github_token, github_path):
-    if uploaded_file is None:
-        st.error("Nenhum arquivo foi carregado.")
-        return False
+def enviar_para_github(file_path, repo_name, token, github_path):
+    g = Github(token)
+    repo = g.get_repo(repo_name)
+    with open(file_path, "rb") as f:
+        content = f.read()
     try:
-        g = Github(github_token)
-        repo = g.get_repo(repo_name)
-    except GithubException as e:
-        st.error(f"Erro ao acessar o repositório: {e}")
-        return False
-    except Exception as e:
-        st.error(f"Erro inesperado: {e}")
-        return False
-
-    try:
-        content = uploaded_file.getvalue()
-        try:
-            existing_file = repo.get_contents(github_path)
-            repo.update_file(
-                path=github_path,
-                message=f"Atualização do arquivo {uploaded_file.name}",
-                content=content,
-                sha=existing_file.sha
-            )
-            st.success(f"Arquivo atualizado com sucesso no GitHub: {github_path}")
-        except GithubException:
-            repo.create_file(
-                path=github_path,
-                message=f"Upload do arquivo {uploaded_file.name}",
-                content=content
-            )
-            st.success(f"Arquivo enviado com sucesso para o GitHub: {github_path}")
-        return True
-    except GithubException as e:
-        st.error(f"Erro ao criar/atualizar o arquivo no GitHub: {e}")
-        return False
-    except Exception as e:
-        st.error(f"Erro inesperado ao enviar para GitHub: {e}")
-        return False
+        file = repo.get_contents(github_path)
+        repo.update_file(file.path, f"Atualizando {file_path}", content, file.sha)
+        return "Arquivo atualizado no GitHub!"
+    except:
+        repo.create_file(github_path, f"Enviando novo arquivo {file_path}", content)
+        return "Arquivo enviado para GitHub!"
 
 # -----------------------------
-# Ações do usuário
+# Streamlit UI
 # -----------------------------
-if st.button("Comparar PBITs"):
-    if uploaded_file and previous_file:
-        diff = comparar_pbits(uploaded_file, previous_file)
-        if not diff:
-            st.success("Não foram encontradas diferenças entre os arquivos.")
+st.title("🔎 Comparação de Modelos Power BI (.pbit)")
+
+pbit_file1 = st.file_uploader("Upload do primeiro arquivo .pbit", type=["pbit"])
+pbit_file2 = st.file_uploader("Upload do segundo arquivo .pbit", type=["pbit"])
+
+if pbit_file1 and pbit_file2:
+    st.info("Comparando modelos...")
+    results = compare_models(pbit_file1, pbit_file2)
+    
+    st.success("✅ Comparação concluída!")
+    
+    # Mostrar resultados
+    for k, df in results.items():
+        st.subheader(k.replace("_", " ").title())
+        st.dataframe(df)
+    
+    # Download do Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        for sheet_name, df in results.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    output.seek(0)
+    st.download_button("📥 Baixar relatório Excel", data=output, file_name="Comparacao_Modelos.xlsx")
+    
+    # GitHub
+    github_token = st.text_input("Token GitHub", type="password")
+    github_repo = st.text_input("Repositório GitHub (usuario/repo)")
+    github_path = st.text_input("Caminho dentro do repositório (ex: modelos/meu_modelo.pbit)")
+    
+    if st.button("📤 Enviar arquivo 2 para GitHub"):
+        if github_token and github_repo and github_path:
+            msg = enviar_para_github(pbit_file2.name, github_repo, github_token, github_path)
+            st.success(msg)
         else:
-            st.warning(f"Foram encontradas {len(diff)} linhas diferentes:")
-            # Exibir até 500 linhas de diferença
-            st.text("\n".join(diff[:500]))
-    else:
-        st.info("Envie os dois arquivos PBIT para comparar.")
+            st.error("Preencha todos os campos do GitHub!")
 
-if st.button("Enviar PBIT para GitHub"):
-    enviar_para_github(uploaded_file, repo_name, github_token, github_path)
