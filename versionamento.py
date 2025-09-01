@@ -94,3 +94,5 @@ if st.button("📌 Analisar"):
             st.write(report["modified"] or "Nenhum")
         else:
             st.info("Nenhum PBIT anterior fornecido, apenas carregado o modelo atual.")
+
+st.info("⚠️ Para enviar arquivos grandes ao GitHub, utilize Git + LFS fora do Streamlit.")
