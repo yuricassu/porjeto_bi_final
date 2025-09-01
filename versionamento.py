@@ -1,11 +1,12 @@
 import streamlit as st
 import zipfile, json
-from github import Github
+from github import Github, GithubException
 
 # -----------------------------
 # Função para extrair DataModel do PBIT
 # -----------------------------
 def carregar_data_model(uploaded_file):
+    uploaded_file.seek(0)
     with zipfile.ZipFile(uploaded_file, "r") as z:
         data_model = json.loads(z.read("DataModelSchema"))
     return data_model.get("model", {})
@@ -76,15 +77,30 @@ def comparar_modelos(old_model, new_model):
 def enviar_para_github(uploaded_file, repo_name, token, github_path):
     g = Github(token)
     repo = g.get_repo(repo_name)
+    
+    # Garantir que o ponteiro do arquivo esteja no início
+    uploaded_file.seek(0)
     content = uploaded_file.read()
 
     try:
-        file = repo.get_contents(github_path)
-        repo.update_file(file.path, f"Atualizando {uploaded_file.name}", content, file.sha)
-        return "Arquivo atualizado no GitHub!"
-    except:
-        repo.create_file(github_path, f"Enviando novo arquivo {uploaded_file.name}", content)
-        return "Arquivo enviado para GitHub!"
+        existing_file = repo.get_contents(github_path)
+        repo.update_file(
+            path=github_path,
+            message=f"Atualizando {uploaded_file.name}",
+            content=content,
+            sha=existing_file.sha
+        )
+        return f"Arquivo atualizado no GitHub: {github_path}"
+    except GithubException as e:
+        if e.status == 404:
+            repo.create_file(
+                path=github_path,
+                message=f"Enviando novo arquivo {uploaded_file.name}",
+                content=content
+            )
+            return f"Arquivo enviado para GitHub: {github_path}"
+        else:
+            raise e
 
 # -----------------------------
 # Streamlit UI
@@ -104,6 +120,7 @@ github_path = st.text_input("Caminho no repositório")
 if st.button("📌 Analisar"):
     if pbit_file:
         new_model = carregar_data_model(pbit_file)
+
         if previous_pbit_file:
             old_model = carregar_data_model(previous_pbit_file)
             report = comparar_modelos(old_model, new_model)
