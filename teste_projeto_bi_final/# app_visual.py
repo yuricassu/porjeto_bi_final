@@ -1,11 +1,11 @@
-# app_visual.py
+# app_visual_avancado.py
 import streamlit as st
 import pandas as pd
 import zipfile, json, re
 from io import BytesIO
 
-st.set_page_config(page_title="Auditoria Power BI Avançada", layout="wide")
-st.title("🔎 Auditoria Avançada de Modelos Power BI (.pbit)")
+st.set_page_config(page_title="Auditoria Power BI Ultra-Visual", layout="wide")
+st.title("🔎 Auditoria Ultra-Visual de Modelos Power BI (.pbit)")
 
 uploaded_file = st.file_uploader("Escolha o arquivo .pbit", type="pbit")
 
@@ -99,9 +99,9 @@ if uploaded_file:
             "orphan_tables": pd.DataFrame(results["orphan_tables"], columns=["table"])
         }
 
-        return results_df, tables, measure_list
+        return results_df, tables, measure_list, relationships
 
-    results, all_tables, all_measures = audit_model(uploaded_file)
+    results, all_tables, all_measures, all_relationships = audit_model(uploaded_file)
 
     st.header("📊 Resumo da Auditoria")
     for key, df in results.items():
@@ -111,7 +111,7 @@ if uploaded_file:
         else:
             st.dataframe(df)
 
-    st.header("💾 Download Excel Avançado")
+    st.header("💾 Download Excel Ultra-Visual")
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         workbook = writer.book
@@ -127,7 +127,7 @@ if uploaded_file:
                 max_len = max(df[value].astype(str).map(len).max(), len(value)) + 2 if not df.empty else len(value)+2
                 worksheet.set_column(col_num, col_num, max_len)
 
-        # Aba Ranking com cores e miniaturas
+        # Aba Ranking_Problemas
         ranking_df = pd.DataFrame({"table": [t["name"] for t in all_tables]})
         ranking_df["colunas_nao_usadas"] = ranking_df["table"].apply(
             lambda x: len([c for t,c in results["unused_columns"].values if t==x])
@@ -156,9 +156,15 @@ if uploaded_file:
             ranking_ws.conditional_format(f"{col_letter}2:{col_letter}{len(ranking_df)+1}",
                                           {'type':'data_bar','bar_color':'#4F81BD'})
 
-        # Miniaturas de tabelas (simples: cor de fundo)
-        for i, row in enumerate(ranking_df.itertuples(), start=1):
-            ranking_ws.write(i, 0, row.table, workbook.add_format({'bg_color':'#E2EFDA'}))
+        # Miniaturas de tabelas com colunas e medidas
+        for i, t in enumerate(all_tables, start=1):
+            start_row = i*5
+            ranking_ws.write(start_row, 0, t["name"], workbook.add_format({'bold':True, 'bg_color':'#E2EFDA'}))
+            for j, c in enumerate(t.get("columns", [])):
+                color = '#FFC7CE' if (t["name"], c["name"]) in [*results["unused_columns"].values] else '#FFF2CC'
+                ranking_ws.write(start_row+j+1, 0, c["name"], workbook.add_format({'bg_color': color}))
+            for k, m in enumerate(t.get("measures", [])):
+                ranking_ws.write(start_row+k+1+len(t.get("columns", [])), 0, m["name"], workbook.add_format({'bg_color':'#D9E1F2'}))
 
         # Aba Dashboard
         dashboard = workbook.add_worksheet("Dashboard")
@@ -178,4 +184,4 @@ if uploaded_file:
         dashboard.insert_chart('D2', chart)
 
     output.seek(0)
-    st.download_button("📥 Baixar Excel Avançado", data=output, file_name="Auditoria_Modelo_PBI_Visual.xlsx")
+    st.download_button("📥 Baixar Excel Ultra-Visual", data=output, file_name="Auditoria_Modelo_PBI_UltraVisual.xlsx")
