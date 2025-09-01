@@ -48,12 +48,7 @@ def comparar_modelos(old_model, new_model):
             if old_c.get("dataType","") != new_c.get("dataType",""):
                 changes.append("tipo")
             if changes:
-                report["modified"].append({
-                    "item": f"{tname}.{cname}",
-                    "alteracoes": ", ".join(changes),
-                    "versao_antiga": old_c,
-                    "versao_nova": new_c
-                })
+                report["modified"].append(f"Coluna modificada em {tname}.{cname}: {', '.join(changes)}")
 
         # Medidas adicionadas/retiradas/modificadas
         old_measures = {m["name"]: m for m in old_t.get("measures", [])}
@@ -72,12 +67,7 @@ def comparar_modelos(old_model, new_model):
             if old_m.get("description","") != new_m.get("description",""):
                 changes.append("descrição")
             if changes:
-                report["modified"].append({
-                    "item": f"{tname}.{mname}",
-                    "alteracoes": ", ".join(changes),
-                    "versao_antiga": old_m,
-                    "versao_nova": new_m
-                })
+                report["modified"].append(f"Medida modificada em {tname}.{mname}: {', '.join(changes)}")
 
     return report
 
@@ -105,17 +95,8 @@ if st.button("📌 Analisar"):
             st.write(report["added"] or "Nenhum")
             st.write("### Removidos")
             st.write(report["removed"] or "Nenhum")
-
             st.write("### Modificados")
-            if report["modified"]:
-                for m in report["modified"]:
-                    st.markdown(f"**Item:** {m['item']}")
-                    st.markdown(f"- Alterações: {m['alteracoes']}")
-                    st.markdown(f"- Versão Antiga: `{m['versao_antiga']}`")
-                    st.markdown(f"- Versão Nova: `{m['versao_nova']}`")
-                    st.markdown("---")
-            else:
-                st.write("Nenhum item modificado.")
+            st.write(report["modified"] or "Nenhum")
 
             # -----------------------------
             # Exportar para Excel
@@ -131,19 +112,8 @@ if st.button("📌 Analisar"):
                 df_removed.to_excel(writer, sheet_name="Removidos", index=False)
 
                 # Modificados
-                if report["modified"]:
-                    df_mod = pd.DataFrame([
-                        {
-                            "Item": m["item"],
-                            "Alterações": m["alteracoes"],
-                            "Versão Antiga": str(m["versao_antiga"]),
-                            "Versão Nova": str(m["versao_nova"])
-                        }
-                        for m in report["modified"]
-                    ])
-                    df_mod.to_excel(writer, sheet_name="Modificados", index=False)
-                else:
-                    df_mod = None
+                df_mod = pd.DataFrame(report["modified"], columns=["Modificados"])
+                df_mod.to_excel(writer, sheet_name="Modificados", index=False)
 
                 # Formatar colunas
                 workbook = writer.book
@@ -154,7 +124,7 @@ if st.button("📌 Analisar"):
                         df_to_use = df_added
                     elif sheet_name == "Removidos":
                         df_to_use = df_removed
-                    elif sheet_name == "Modificados" and df_mod is not None:
+                    elif sheet_name == "Modificados":
                         df_to_use = df_mod
 
                     if df_to_use is not None:
