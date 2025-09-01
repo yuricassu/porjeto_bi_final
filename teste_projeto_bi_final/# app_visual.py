@@ -1,4 +1,4 @@
-# app_visual_avancado.py
+# app_visual_corrigido.py
 import streamlit as st
 import pandas as pd
 import zipfile, json, re
@@ -156,12 +156,19 @@ if uploaded_file:
             ranking_ws.conditional_format(f"{col_letter}2:{col_letter}{len(ranking_df)+1}",
                                           {'type':'data_bar','bar_color':'#4F81BD'})
 
-        # Miniaturas de tabelas com colunas e medidas
+        # Miniaturas de tabelas com cores corrigidas
+        unused_columns_set = set([tuple(x) for x in results["unused_columns"].values])
+        missing_desc_set = set([tuple(x) for x in results["missing_descriptions"].values])
         for i, t in enumerate(all_tables, start=1):
             start_row = i*5
             ranking_ws.write(start_row, 0, t["name"], workbook.add_format({'bold':True, 'bg_color':'#E2EFDA'}))
             for j, c in enumerate(t.get("columns", [])):
-                color = '#FFC7CE' if (t["name"], c["name"]) in [*results["unused_columns"].values] else '#FFF2CC'
+                if (t["name"], c["name"]) in unused_columns_set:
+                    color = '#FFC7CE'
+                elif (t["name"], c["name"]) in missing_desc_set:
+                    color = '#FFF2CC'
+                else:
+                    color = '#FFFFFF'
                 ranking_ws.write(start_row+j+1, 0, c["name"], workbook.add_format({'bg_color': color}))
             for k, m in enumerate(t.get("measures", [])):
                 ranking_ws.write(start_row+k+1+len(t.get("columns", [])), 0, m["name"], workbook.add_format({'bg_color':'#D9E1F2'}))
@@ -178,10 +185,11 @@ if uploaded_file:
         chart.add_series({
             'categories': f"=Dashboard!$A$2:$A${len(categories)+1}",
             'values': f"=Dashboard!$B$2:$B${len(categories)+1}",
-            'data_labels': {'value': True}
+            'data_labels': {'value': True},
+            'fill': {'color': '#4F81BD'}
         })
-        chart.set_title({'name': 'Resumo da Auditoria'})
+        chart.set_title({'name':'Resumo Auditoria'})
         dashboard.insert_chart('D2', chart)
 
     output.seek(0)
-    st.download_button("📥 Baixar Excel Ultra-Visual", data=output, file_name="Auditoria_Modelo_PBI_UltraVisual.xlsx")
+    st.download_button("📥 Baixar Excel Ultra-Visual", data=output, file_name="Auditoria_PowerBI_UltraVisual.xlsx")
