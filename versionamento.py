@@ -1,6 +1,7 @@
 import streamlit as st
 from github import Github, GithubException
 import tempfile
+import zipfile
 import difflib
 
 st.title("Versionamento e Envio de PBIT para GitHub")
@@ -27,15 +28,13 @@ def comparar_pbits(file_current, file_previous):
     Compara dois arquivos PBIT linha a linha (como texto JSON dentro do DataModelSchema)
     Retorna uma lista de diferenças
     """
-    import zipfile, json
-
-    # Função interna para extrair JSON do DataModelSchema
     def extrair_schema(pbit_bytes):
+        """Extrai DataModelSchema do PBIT como lista de linhas, ignorando erros de encoding."""
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(pbit_bytes)
             tmp_path = tmp.name
         with zipfile.ZipFile(tmp_path, "r") as z:
-            data = z.read("DataModelSchema").decode("utf-8")
+            data = z.read("DataModelSchema").decode("utf-8", errors="ignore")
         return data.splitlines()
 
     current_lines = extrair_schema(file_current.getvalue())
@@ -97,7 +96,8 @@ if st.button("Comparar PBITs"):
             st.success("Não foram encontradas diferenças entre os arquivos.")
         else:
             st.warning(f"Foram encontradas {len(diff)} linhas diferentes:")
-            st.text("\n".join(diff[:1000]))  # mostra até 1000 linhas de diferença
+            # Exibir até 500 linhas de diferença
+            st.text("\n".join(diff[:500]))
     else:
         st.info("Envie os dois arquivos PBIT para comparar.")
 
