@@ -39,7 +39,7 @@ def comparar_modelos(old_model, new_model):
         report["added"].extend([f"Coluna adicionada em {tname}: {c}" for c in added_cols])
         report["removed"].extend([f"Coluna removida em {tname}: {c}" for c in removed_cols])
 
-        # Colunas modificadas (descrição ou tipo)
+        # Colunas modificadas
         for cname in set(old_cols) & set(new_cols):
             old_c, new_c = old_cols[cname], new_cols[cname]
             changes = []
@@ -48,7 +48,12 @@ def comparar_modelos(old_model, new_model):
             if old_c.get("dataType","") != new_c.get("dataType",""):
                 changes.append(f"tipo: {old_c.get('dataType','')} → {new_c.get('dataType','')}")
             if changes:
-                report["modified"].append(f"Coluna modificada em {tname}.{cname}: {', '.join(changes)}")
+                report["modified"].append({
+                    "tipo": "Coluna",
+                    "tabela": tname,
+                    "nome": cname,
+                    "alteracoes": ", ".join(changes)
+                })
 
         # Medidas adicionadas/retiradas/modificadas
         old_measures = {m["name"]: m for m in old_t.get("measures", [])}
@@ -67,7 +72,12 @@ def comparar_modelos(old_model, new_model):
             if old_m.get("description","") != new_m.get("description",""):
                 changes.append(f"descrição: '{old_m.get('description','')}' → '{new_m.get('description','')}'")
             if changes:
-                report["modified"].append(f"Medida modificada em {tname}.{mname}: {', '.join(changes)}")
+                report["modified"].append({
+                    "tipo": "Medida",
+                    "tabela": tname,
+                    "nome": mname,
+                    "alteracoes": ", ".join(changes)
+                })
 
     return report
 
@@ -95,7 +105,6 @@ if st.button("📌 Analisar"):
                 "Categoria": ["Adicionados", "Removidos", "Modificados"],
                 "Quantidade": [len(report["added"]), len(report["removed"]), len(report["modified"])]
             })
-
             chart = alt.Chart(df_summary).mark_bar().encode(
                 x=alt.X('Categoria', sort=None),
                 y='Quantidade',
@@ -111,10 +120,12 @@ if st.button("📌 Analisar"):
             st.write(report["added"] or "Nenhum")
             st.write("### Removidos")
             st.write(report["removed"] or "Nenhum")
+
             st.write("### Modificados")
             if report["modified"]:
-                for mod in report["modified"]:
-                    st.write(f"- {mod}")
+                df_mod = pd.DataFrame(report["modified"])
+                # Destaque visual usando st.dataframe
+                st.dataframe(df_mod, use_container_width=True)
             else:
                 st.write("Nenhum")
         else:
