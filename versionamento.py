@@ -1,5 +1,7 @@
 import streamlit as st
 import zipfile, json
+import pandas as pd
+import altair as alt
 
 # -----------------------------
 # Função para extrair DataModel do PBIT
@@ -85,7 +87,26 @@ if st.button("📌 Analisar"):
             old_model = carregar_data_model(previous_pbit_file)
             report = comparar_modelos(old_model, new_model)
 
-            st.subheader("🔍 Relatório de Alterações")
+            # -----------------------------
+            # Dashboard Resumido
+            # -----------------------------
+            st.subheader("📊 Resumo de Alterações")
+            df_summary = pd.DataFrame({
+                "Categoria": ["Adicionados", "Removidos", "Modificados"],
+                "Quantidade": [len(report["added"]), len(report["removed"]), len(report["modified"])]
+            })
+
+            chart = alt.Chart(df_summary).mark_bar().encode(
+                x=alt.X('Categoria', sort=None),
+                y='Quantidade',
+                color='Categoria'
+            ).properties(width=600, height=400, title="Resumo de Alterações no Modelo")
+            st.altair_chart(chart)
+
+            # -----------------------------
+            # Relatório Detalhado
+            # -----------------------------
+            st.subheader("🔍 Relatório de Alterações Detalhado")
             st.write("### Adicionados")
             st.write(report["added"] or "Nenhum")
             st.write("### Removidos")
