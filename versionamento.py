@@ -6,7 +6,6 @@ from github import Github, GithubException
 # Função para extrair DataModel do PBIT
 # -----------------------------
 def carregar_data_model(uploaded_file):
-    uploaded_file.seek(0)
     with zipfile.ZipFile(uploaded_file, "r") as z:
         data_model = json.loads(z.read("DataModelSchema"))
     return data_model.get("model", {})
@@ -72,35 +71,54 @@ def comparar_modelos(old_model, new_model):
     return report
 
 # -----------------------------
-# Função para enviar arquivo para GitHub
+# Função para enviar arquivo para GitHub (robusta)
 # -----------------------------
-def enviar_para_github(uploaded_file, repo_name, token, github_path):
-    g = Github(token)
-    repo = g.get_repo(repo_name)
-    
-    # Garantir que o ponteiro do arquivo esteja no início
-    uploaded_file.seek(0)
-    content = uploaded_file.read()
+def enviar_para_github_streamlit(uploaded_file, repo_name, token, github_path):
+    if not uploaded_file or not repo_name or not token or not github_path:
+        st.warning("Preencha todos os campos de GitHub (token, repositório e caminho).")
+        return
 
     try:
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+    except GithubException as e:
+        st.error(f"Erro ao acessar o repositório: {e.data.get('message', str(e))}")
+        return
+    except Exception as e:
+        st.error(f"Erro inesperado ao conectar ao GitHub: {str(e)}")
+        return
+
+    try:
+        uploaded_file.seek(0)
+        content = uploaded_file.read()
+        # Verifica se o arquivo já existe
         existing_file = repo.get_contents(github_path)
+        # Atualiza arquivo existente
         repo.update_file(
             path=github_path,
             message=f"Atualizando {uploaded_file.name}",
             content=content,
             sha=existing_file.sha
         )
-        return f"Arquivo atualizado no GitHub: {github_path}"
+        st.success(f"Arquivo atualizado com sucesso: {github_path}")
     except GithubException as e:
         if e.status == 404:
-            repo.create_file(
-                path=github_path,
-                message=f"Enviando novo arquivo {uploaded_file.name}",
-                content=content
-            )
-            return f"Arquivo enviado para GitHub: {github_path}"
+            # Arquivo não existe → criar
+            try:
+                repo.create_file(
+                    path=github_path,
+                    message=f"Enviando novo arquivo {uploaded_file.name}",
+                    content=content
+                )
+                st.success(f"Arquivo enviado com sucesso: {github_path}")
+            except GithubException as e2:
+                st.error(f"Erro ao criar arquivo: {e2.data.get('message', str(e2))}")
+        elif e.status == 403:
+            st.error("Erro de permissão: verifique o token e o acesso ao repositório.")
         else:
-            raise e
+            st.error(f"Erro GitHub: {e.data.get('message', str(e))}")
+    except Exception as e:
+        st.error(f"Erro inesperado: {str(e)}")
 
 # -----------------------------
 # Streamlit UI
@@ -120,7 +138,6 @@ github_path = st.text_input("Caminho no repositório")
 if st.button("📌 Analisar"):
     if pbit_file:
         new_model = carregar_data_model(pbit_file)
-
         if previous_pbit_file:
             old_model = carregar_data_model(previous_pbit_file)
             report = comparar_modelos(old_model, new_model)
@@ -137,5 +154,5 @@ if st.button("📌 Analisar"):
 
         # Envio para GitHub
         if github_token and github_repo and github_path:
-            msg = enviar_para_github(pbit_file, github_repo, github_token, github_path)
-            st.success(msg)
+            enviar_para_github_streamlit(pbit_file, github_repo, github_token, github_path)
+
