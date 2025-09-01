@@ -1,138 +1,124 @@
-# -----------------------------
-# Instalar dependências
-# -----------------------------
-
-import zipfile, json, re, io
-import pandas as pd
 import streamlit as st
+import zipfile, json
 from github import Github
 
 # -----------------------------
-# Funções auxiliares
+# Função para extrair DataModel do PBIT
 # -----------------------------
-DAX_REF_PATTERN = re.compile(r"'?([A-Za-z0-9_ ]+)'?\[([A-Za-z0-9_ ]+)\]")
-
-def extract_table_column_refs_from_text(text):
-    used = set()
-    if not text:
-        return used
-    if isinstance(text, list):
-        text = "\n".join(text)
-    if not isinstance(text, str):
-        return used
-    for m in DAX_REF_PATTERN.finditer(text):
-        if m.group(1) and m.group(2):
-            used.add((m.group(1).strip(), m.group(2).strip()))
-    return used
-
-def load_model_json(pbit_file):
-    with zipfile.ZipFile(pbit_file, "r") as z:
-        return json.loads(z.read("DataModelSchema"))
-
-def extract_model_info(model_json):
-    tables = model_json.get("model", {}).get("tables", [])
-    relationships = model_json.get("model", {}).get("relationships", [])
-    measure_list = []
-    for t in tables:
-        tname = t["name"]
-        for m in t.get("measures", []):
-            expr = m.get("expression", "")
-            if isinstance(expr, list):
-                expr = "\n".join(expr)
-            measure_list.append({"table": tname, "measure": m["name"], "expression": expr})
-    return tables, relationships, measure_list
+def carregar_data_model(uploaded_file):
+    with zipfile.ZipFile(uploaded_file, "r") as z:
+        data_model = json.loads(z.read("DataModelSchema"))
+    return data_model.get("model", {})
 
 # -----------------------------
-# Função de comparação
+# Função para comparar dois modelos
 # -----------------------------
-def compare_models(pbit1, pbit2):
-    model1 = load_model_json(pbit1)
-    model2 = load_model_json(pbit2)
-    
-    tables1, rels1, measures1 = extract_model_info(model1)
-    tables2, rels2, measures2 = extract_model_info(model2)
-    
-    # Tabelas adicionadas ou removidas
-    t1 = set([t["name"] for t in tables1])
-    t2 = set([t["name"] for t in tables2])
-    added_tables = t2 - t1
-    removed_tables = t1 - t2
-    
-    # Medidas adicionadas ou removidas
-    m1 = set([(m["table"], m["measure"]) for m in measures1])
-    m2 = set([(m["table"], m["measure"]) for m in measures2])
-    added_measures = m2 - m1
-    removed_measures = m1 - m2
-    
-    # Relacionamentos
-    r1 = set([(r["fromTable"], r["fromColumn"], r["toTable"], r["toColumn"]) for r in rels1])
-    r2 = set([(r["fromTable"], r["fromColumn"], r["toTable"], r["toColumn"]) for r in rels2])
-    added_rels = r2 - r1
-    removed_rels = r1 - r2
-    
-    results = {
-        "added_tables": pd.DataFrame(list(added_tables), columns=["table"]),
-        "removed_tables": pd.DataFrame(list(removed_tables), columns=["table"]),
-        "added_measures": pd.DataFrame(list(added_measures), columns=["table","measure"]),
-        "removed_measures": pd.DataFrame(list(removed_measures), columns=["table","measure"]),
-        "added_relationships": pd.DataFrame(list(added_rels), columns=["fromTable","fromColumn","toTable","toColumn"]),
-        "removed_relationships": pd.DataFrame(list(removed_rels), columns=["fromTable","fromColumn","toTable","toColumn"])
-    }
-    
-    return results
+def comparar_modelos(old_model, new_model):
+    report = {"added": [], "removed": [], "modified": []}
+
+    old_tables = {t["name"]: t for t in old_model.get("tables", [])}
+    new_tables = {t["name"]: t for t in new_model.get("tables", [])}
+
+    # Tabelas adicionadas/retiradas
+    added_tables = set(new_tables) - set(old_tables)
+    removed_tables = set(old_tables) - set(new_tables)
+    report["added"].extend([f"Tabela adicionada: {t}" for t in added_tables])
+    report["removed"].extend([f"Tabela removida: {t}" for t in removed_tables])
+
+    # Tabelas existentes → checar colunas/medidas
+    for tname in set(old_tables) & set(new_tables):
+        old_t, new_t = old_tables[tname], new_tables[tname]
+
+        old_cols = {c["name"]: c for c in old_t.get("columns", [])}
+        new_cols = {c["name"]: c for c in new_t.get("columns", [])}
+
+        # Colunas adicionadas/retiradas
+        added_cols = set(new_cols) - set(old_cols)
+        removed_cols = set(old_cols) - set(new_cols)
+        report["added"].extend([f"Coluna adicionada em {tname}: {c}" for c in added_cols])
+        report["removed"].extend([f"Coluna removida em {tname}: {c}" for c in removed_cols])
+
+        # Colunas modificadas (descrição ou tipo)
+        for cname in set(old_cols) & set(new_cols):
+            old_c, new_c = old_cols[cname], new_cols[cname]
+            changes = []
+            if old_c.get("description","") != new_c.get("description",""):
+                changes.append("descrição")
+            if old_c.get("dataType","") != new_c.get("dataType",""):
+                changes.append("tipo")
+            if changes:
+                report["modified"].append(f"Coluna modificada em {tname}.{cname}: {', '.join(changes)}")
+
+        # Medidas adicionadas/retiradas/modificadas
+        old_measures = {m["name"]: m for m in old_t.get("measures", [])}
+        new_measures = {m["name"]: m for m in new_t.get("measures", [])}
+
+        added_measures = set(new_measures) - set(old_measures)
+        removed_measures = set(old_measures) - set(new_measures)
+        report["added"].extend([f"Medida adicionada em {tname}: {m}" for m in added_measures])
+        report["removed"].extend([f"Medida removida em {tname}: {m}" for m in removed_measures])
+
+        for mname in set(old_measures) & set(new_measures):
+            old_m, new_m = old_measures[mname], new_measures[mname]
+            changes = []
+            if old_m.get("expression","") != new_m.get("expression",""):
+                changes.append("DAX")
+            if old_m.get("description","") != new_m.get("description",""):
+                changes.append("descrição")
+            if changes:
+                report["modified"].append(f"Medida modificada em {tname}.{mname}: {', '.join(changes)}")
+
+    return report
 
 # -----------------------------
-# Função de envio para GitHub
+# Função para enviar arquivo para GitHub
 # -----------------------------
-def enviar_para_github(file_path, repo_name, token, github_path):
+def enviar_para_github(uploaded_file, repo_name, token, github_path):
     g = Github(token)
     repo = g.get_repo(repo_name)
-    with open(file_path, "rb") as f:
-        content = f.read()
+    content = uploaded_file.read()
+
     try:
         file = repo.get_contents(github_path)
-        repo.update_file(file.path, f"Atualizando {file_path}", content, file.sha)
+        repo.update_file(file.path, f"Atualizando {uploaded_file.name}", content, file.sha)
         return "Arquivo atualizado no GitHub!"
     except:
-        repo.create_file(github_path, f"Enviando novo arquivo {file_path}", content)
+        repo.create_file(github_path, f"Enviando novo arquivo {uploaded_file.name}", content)
         return "Arquivo enviado para GitHub!"
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("🔎 Comparação de Modelos Power BI (.pbit)")
+st.title("📊 Versionamento e Auditoria de PBIT")
 
-pbit_file1 = st.file_uploader("Upload do primeiro arquivo .pbit", type=["pbit"])
-pbit_file2 = st.file_uploader("Upload do segundo arquivo .pbit", type=["pbit"])
+# Uploads
+pbit_file = st.file_uploader("📂 Carregue o PBIT Atual", type=["pbit"])
+previous_pbit_file = st.file_uploader("📂 Carregue o PBIT Anterior (para comparação)", type=["pbit"])
 
-if pbit_file1 and pbit_file2:
-    st.info("Comparando modelos...")
-    results = compare_models(pbit_file1, pbit_file2)
-    
-    st.success("✅ Comparação concluída!")
-    
-    # Mostrar resultados
-    for k, df in results.items():
-        st.subheader(k.replace("_", " ").title())
-        st.dataframe(df)
-    
-    # Download do Excel
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        for sheet_name, df in results.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    output.seek(0)
-    st.download_button("📥 Baixar relatório Excel", data=output, file_name="Comparacao_Modelos.xlsx")
-    
-    # GitHub
-    github_token = st.text_input("Token GitHub", type="password")
-    github_repo = st.text_input("Repositório GitHub (usuario/repo)")
-    github_path = st.text_input("Caminho dentro do repositório (ex: modelos/meu_modelo.pbit)")
-    
-    if st.button("📤 Enviar arquivo 2 para GitHub"):
-        if github_token and github_repo and github_path:
-            msg = enviar_para_github(pbit_file2.name, github_repo, github_token, github_path)
-            st.success(msg)
+# GitHub inputs
+st.subheader("💾 GitHub (opcional)")
+github_token = st.text_input("Token", type="password")
+github_repo = st.text_input("Repositório (user/repo)")
+github_path = st.text_input("Caminho no repositório")
+
+if st.button("📌 Analisar"):
+    if pbit_file:
+        new_model = carregar_data_model(pbit_file)
+        if previous_pbit_file:
+            old_model = carregar_data_model(previous_pbit_file)
+            report = comparar_modelos(old_model, new_model)
+
+            st.subheader("🔍 Relatório de Alterações")
+            st.write("### Adicionados")
+            st.write(report["added"] or "Nenhum")
+            st.write("### Removidos")
+            st.write(report["removed"] or "Nenhum")
+            st.write("### Modificados")
+            st.write(report["modified"] or "Nenhum")
         else:
-            st.error("Preencha todos os campos do GitHub!")
+            st.info("Nenhum PBIT anterior fornecido, apenas carregado o modelo atual.")
 
+        # Envio para GitHub
+        if github_token and github_repo and github_path:
+            msg = enviar_para_github(pbit_file, github_repo, github_token, github_path)
+            st.success(msg)
