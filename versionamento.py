@@ -121,16 +121,13 @@ if st.button("📌 Analisar"):
 
             st.write("### Modificados")
             if report["modified"]:
-                df_mod = pd.DataFrame([
-                    {
-                        "Item": m["item"],
-                        "Alterações": m["alteracoes"],
-                        "Versão Antiga": str(m["versao_antiga"]),
-                        "Versão Nova": str(m["versao_nova"])
-                    }
-                    for m in report["modified"]
-                ])
-                st.dataframe(df_mod)
+                # Mantendo a versão visual detalhada
+                for m in report["modified"]:
+                    st.markdown(f"**Item:** {m['item']}")
+                    st.markdown(f"- Alterações: {m['alteracoes']}")
+                    st.markdown(f"- Versão Antiga: `{m['versao_antiga']}`")
+                    st.markdown(f"- Versão Nova: `{m['versao_nova']}`")
+                    st.markdown("---")
             else:
                 st.write("Nenhum item modificado.")
 
@@ -142,13 +139,25 @@ if st.button("📌 Analisar"):
                 pd.DataFrame(report["added"], columns=["Adicionados"]).to_excel(writer, sheet_name="Adicionados", index=False)
                 pd.DataFrame(report["removed"], columns=["Removidos"]).to_excel(writer, sheet_name="Removidos", index=False)
                 if report["modified"]:
+                    df_mod = pd.DataFrame([
+                        {
+                            "Item": m["item"],
+                            "Alterações": m["alteracoes"],
+                            "Versão Antiga": str(m["versao_antiga"]),
+                            "Versão Nova": str(m["versao_nova"])
+                        }
+                        for m in report["modified"]
+                    ])
                     df_mod.to_excel(writer, sheet_name="Modificados", index=False)
-                workbook = writer.book
 
+                workbook = writer.book
                 # Ajuste de largura das colunas
                 for sheet_name in writer.sheets:
                     worksheet = writer.sheets[sheet_name]
-                    df = df_mod if sheet_name == "Modificados" else pd.DataFrame(report[sheet_name.lower()], columns=[sheet_name])
+                    if sheet_name == "Modificados" and report["modified"]:
+                        df = df_mod
+                    else:
+                        df = pd.DataFrame(report[sheet_name.lower()], columns=[sheet_name])
                     for idx, col in enumerate(df.columns):
                         max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
                         worksheet.set_column(idx, idx, max_len)
