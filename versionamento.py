@@ -42,17 +42,23 @@ def comparar_modelos(old_model, new_model):
         # Colunas modificadas
         for cname in set(old_cols) & set(new_cols):
             old_c, new_c = old_cols[cname], new_cols[cname]
-            changes = []
             if old_c.get("description","") != new_c.get("description",""):
-                changes.append(f"descrição: '{old_c.get('description','')}' → '{new_c.get('description','')}'")
-            if old_c.get("dataType","") != new_c.get("dataType",""):
-                changes.append(f"tipo: {old_c.get('dataType','')} → {new_c.get('dataType','')}")
-            if changes:
                 report["modified"].append({
                     "tipo": "Coluna",
                     "tabela": tname,
                     "nome": cname,
-                    "alteracoes": ", ".join(changes)
+                    "alteracao_tipo": "descrição",
+                    "valor_antigo": old_c.get("description",""),
+                    "valor_novo": new_c.get("description","")
+                })
+            if old_c.get("dataType","") != new_c.get("dataType",""):
+                report["modified"].append({
+                    "tipo": "Coluna",
+                    "tabela": tname,
+                    "nome": cname,
+                    "alteracao_tipo": "tipo",
+                    "valor_antigo": old_c.get("dataType",""),
+                    "valor_novo": new_c.get("dataType","")
                 })
 
         # Medidas adicionadas/retiradas/modificadas
@@ -66,17 +72,23 @@ def comparar_modelos(old_model, new_model):
 
         for mname in set(old_measures) & set(new_measures):
             old_m, new_m = old_measures[mname], new_measures[mname]
-            changes = []
             if old_m.get("expression","") != new_m.get("expression",""):
-                changes.append(f"DAX alterado: '{old_m.get('expression','')}' → '{new_m.get('expression','')}'")
-            if old_m.get("description","") != new_m.get("description",""):
-                changes.append(f"descrição: '{old_m.get('description','')}' → '{new_m.get('description','')}'")
-            if changes:
                 report["modified"].append({
                     "tipo": "Medida",
                     "tabela": tname,
                     "nome": mname,
-                    "alteracoes": ", ".join(changes)
+                    "alteracao_tipo": "DAX",
+                    "valor_antigo": old_m.get("expression",""),
+                    "valor_novo": new_m.get("expression","")
+                })
+            if old_m.get("description","") != new_m.get("description",""):
+                report["modified"].append({
+                    "tipo": "Medida",
+                    "tabela": tname,
+                    "nome": mname,
+                    "alteracao_tipo": "descrição",
+                    "valor_antigo": old_m.get("description",""),
+                    "valor_novo": new_m.get("description","")
                 })
 
     return report
@@ -124,9 +136,9 @@ if st.button("📌 Analisar"):
             st.write("### Modificados")
             if report["modified"]:
                 df_mod = pd.DataFrame(report["modified"])
-                # Destaque visual usando st.dataframe
                 st.dataframe(df_mod, use_container_width=True)
             else:
                 st.write("Nenhum")
         else:
             st.info("Nenhum PBIT anterior fornecido, apenas carregado o modelo atual.")
+
