@@ -43,22 +43,16 @@ def comparar_modelos(old_model, new_model):
         for cname in set(old_cols) & set(new_cols):
             old_c, new_c = old_cols[cname], new_cols[cname]
             changes = []
-            old_val = {}
-            new_val = {}
             if old_c.get("description","") != new_c.get("description",""):
                 changes.append("descrição")
-                old_val["description"] = old_c.get("description","")
-                new_val["description"] = new_c.get("description","")
             if old_c.get("dataType","") != new_c.get("dataType",""):
                 changes.append("tipo")
-                old_val["dataType"] = old_c.get("dataType","")
-                new_val["dataType"] = new_c.get("dataType","")
             if changes:
                 report["modified"].append({
-                    "item": f"Coluna {tname}.{cname}",
+                    "item": f"{tname}.{cname}",
                     "alteracoes": ", ".join(changes),
-                    "versao_antiga": old_val,
-                    "versao_nova": new_val
+                    "versao_antiga": old_c,
+                    "versao_nova": new_c
                 })
 
         # Medidas adicionadas/retiradas/modificadas
@@ -73,22 +67,16 @@ def comparar_modelos(old_model, new_model):
         for mname in set(old_measures) & set(new_measures):
             old_m, new_m = old_measures[mname], new_measures[mname]
             changes = []
-            old_val = {}
-            new_val = {}
             if old_m.get("expression","") != new_m.get("expression",""):
                 changes.append("DAX")
-                old_val["expression"] = old_m.get("expression","")
-                new_val["expression"] = new_m.get("expression","")
             if old_m.get("description","") != new_m.get("description",""):
                 changes.append("descrição")
-                old_val["description"] = old_m.get("description","")
-                new_val["description"] = new_m.get("description","")
             if changes:
                 report["modified"].append({
-                    "item": f"Medida {tname}.{mname}",
+                    "item": f"{tname}.{mname}",
                     "alteracoes": ", ".join(changes),
-                    "versao_antiga": old_val,
-                    "versao_nova": new_val
+                    "versao_antiga": old_m,
+                    "versao_nova": new_m
                 })
 
     return report
@@ -104,33 +92,28 @@ previous_pbit_file = st.file_uploader("📂 Carregue o PBIT Anterior (para compa
 
 if st.button("📌 Analisar"):
     if not pbit_file:
-        st.warning("Carregue o PBIT atual.")
+        st.warning("Por favor, carregue o PBIT atual.")
     else:
         new_model = carregar_data_model(pbit_file)
+
         if previous_pbit_file:
             old_model = carregar_data_model(previous_pbit_file)
             report = comparar_modelos(old_model, new_model)
 
             st.subheader("🔍 Relatório de Alterações")
-
             st.write("### Adicionados")
             st.write(report["added"] or "Nenhum")
-
             st.write("### Removidos")
             st.write(report["removed"] or "Nenhum")
 
             st.write("### Modificados")
             if report["modified"]:
-                df_mod = pd.DataFrame([
-                    {
-                        "Item": m["item"],
-                        "Alterações": m["alteracoes"],
-                        "Versão Antiga": str(m["versao_antiga"]),
-                        "Versão Nova": str(m["versao_nova"])
-                    }
-                    for m in report["modified"]
-                ])
-                st.dataframe(df_mod)
+                for m in report["modified"]:
+                    st.markdown(f"**Item:** {m['item']}")
+                    st.markdown(f"- Alterações: {m['alteracoes']}")
+                    st.markdown(f"- Versão Antiga: `{m['versao_antiga']}`")
+                    st.markdown(f"- Versão Nova: `{m['versao_nova']}`")
+                    st.markdown("---")
             else:
                 st.write("Nenhum item modificado.")
 
@@ -139,27 +122,51 @@ if st.button("📌 Analisar"):
             # -----------------------------
             output = BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                pd.DataFrame(report["added"], columns=["Adicionados"]).to_excel(writer, sheet_name="Adicionados", index=False)
-                pd.DataFrame(report["removed"], columns=["Removidos"]).to_excel(writer, sheet_name="Removidos", index=False)
-                if report["modified"]:
-                    df_mod.to_excel(writer, sheet_name="Modificados", index=False)
-                workbook = writer.book
+                # Adicionados
+                df_added = pd.DataFrame(report["added"], columns=["Adicionados"])
+                df_added.to_excel(writer, sheet_name="Adicionados", index=False)
 
-                # Ajuste de largura das colunas
+                # Removidos
+                df_removed = pd.DataFrame(report["removed"], columns=["Removidos"])
+                df_removed.to_excel(writer, sheet_name="Removidos", index=False)
+
+                # Modificados
+                if report["modified"]:
+                    df_mod = pd.DataFrame([
+                        {
+                            "Item": m["item"],
+                            "Alterações": m["alteracoes"],
+                            "Versão Antiga": str(m["versao_antiga"]),
+                            "Versão Nova": str(m["versao_nova"])
+                        }
+                        for m in report["modified"]
+                    ])
+                    df_mod.to_excel(writer, sheet_name="Modificados", index=False)
+                else:
+                    df_mod = None
+
+                # Formatar colunas
+                workbook = writer.book
                 for sheet_name in writer.sheets:
                     worksheet = writer.sheets[sheet_name]
-                    df = df_mod if sheet_name == "Modificados" else pd.DataFrame(report[sheet_name.lower()], columns=[sheet_name])
-                    for idx, col in enumerate(df.columns):
-                        max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                        worksheet.set_column(idx, idx, max_len)
+                    df_to_use = None
+                    if sheet_name == "Adicionados":
+                        df_to_use = df_added
+                    elif sheet_name == "Removidos":
+                        df_to_use = df_removed
+                    elif sheet_name == "Modificados" and df_mod is not None:
+                        df_to_use = df_mod
 
-            output.seek(0)
+                    if df_to_use is not None:
+                        for idx, col in enumerate(df_to_use.columns):
+                            max_len = max(df_to_use[col].astype(str).map(len).max(), len(col)) + 2
+                            worksheet.set_column(idx, idx, max_len)
+
             st.download_button(
-                label="⬇️ Baixar relatório completo em Excel",
-                data=output,
-                file_name="Auditoria_PBIT.xlsx",
+                label="⬇️ Baixar relatório Excel",
+                data=output.getvalue(),
+                file_name="Auditoria_Versionamento_PBIT.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
             st.info("Nenhum PBIT anterior fornecido, apenas carregado o modelo atual.")
-
