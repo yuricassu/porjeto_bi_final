@@ -42,9 +42,9 @@ def comparar_modelos(old_model, new_model):
             old_c, new_c = old_cols[cname], new_cols[cname]
             changes = []
             if old_c.get("description","") != new_c.get("description",""):
-                changes.append("descrição")
+                changes.append(f"descrição: '{old_c.get('description','')}' → '{new_c.get('description','')}'")
             if old_c.get("dataType","") != new_c.get("dataType",""):
-                changes.append("tipo")
+                changes.append(f"tipo: {old_c.get('dataType','')} → {new_c.get('dataType','')}")
             if changes:
                 report["modified"].append(f"Coluna modificada em {tname}.{cname}: {', '.join(changes)}")
 
@@ -61,9 +61,9 @@ def comparar_modelos(old_model, new_model):
             old_m, new_m = old_measures[mname], new_measures[mname]
             changes = []
             if old_m.get("expression","") != new_m.get("expression",""):
-                changes.append("DAX")
+                changes.append(f"DAX alterado: '{old_m.get('expression','')}' → '{new_m.get('expression','')}'")
             if old_m.get("description","") != new_m.get("description",""):
-                changes.append("descrição")
+                changes.append(f"descrição: '{old_m.get('description','')}' → '{new_m.get('description','')}'")
             if changes:
                 report["modified"].append(f"Medida modificada em {tname}.{mname}: {', '.join(changes)}")
 
@@ -91,6 +91,10 @@ if st.button("📌 Analisar"):
             st.write("### Removidos")
             st.write(report["removed"] or "Nenhum")
             st.write("### Modificados")
-            st.write(report["modified"] or "Nenhum")
+            if report["modified"]:
+                for mod in report["modified"]:
+                    st.write(f"- {mod}")
+            else:
+                st.write("Nenhum")
         else:
             st.info("Nenhum PBIT anterior fornecido, apenas carregado o modelo atual.")
