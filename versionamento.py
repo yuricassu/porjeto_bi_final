@@ -1,7 +1,6 @@
 # -----------------------------
 # Instalar dependências
 # -----------------------------
-!pip install PyGithub pandas openpyxl xlsxwriter streamlit
 
 import zipfile, json, re, io
 import pandas as pd
